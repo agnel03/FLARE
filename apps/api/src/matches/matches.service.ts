@@ -1,7 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { FootballEventType, Prisma, PrismaClient } from "@flare/db";
-import type { AddParticipantInput, CreateMatchInput } from "@flare/shared";
+import type { AddParticipantInput, AssignMatchOperatorInput, CreateMatchInput } from "@flare/shared";
 import { PRISMA } from "../prisma/prisma.module";
 import { ApiException } from "../common/api-exception";
 import { PermissionsService } from "../common/permissions.service";
@@ -173,6 +173,34 @@ export class MatchesService {
         corners: byTeam(match.awayTeamId, ["CORNER"]),
       },
     };
+  }
+
+  async assignOperator(accountId: string, matchId: string, input: AssignMatchOperatorInput) {
+    await this.permissions.assertIsMatchCreator(accountId, matchId);
+
+    const account = await this.prisma.account.findUnique({ where: { email: input.email } });
+    if (!account) {
+      throw new ApiException("RESOURCE_NOT_FOUND", "No FLARE account exists with that email.");
+    }
+
+    return this.prisma.matchOperator.upsert({
+      where: { matchId_accountId: { matchId, accountId: account.id } },
+      update: { role: input.role },
+      create: { matchId, accountId: account.id, role: input.role, grantedByAccountId: accountId },
+    });
+  }
+
+  async listOperators(accountId: string, matchId: string) {
+    await this.permissions.assertIsMatchCreator(accountId, matchId);
+    return this.prisma.matchOperator.findMany({
+      where: { matchId },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  async revokeOperator(accountId: string, matchId: string, targetAccountId: string) {
+    await this.permissions.assertIsMatchCreator(accountId, matchId);
+    await this.prisma.matchOperator.deleteMany({ where: { matchId, accountId: targetAccountId } });
   }
 
   private async requireStatus(matchId: string, status: "LIVE" | "PAUSED") {

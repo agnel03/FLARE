@@ -223,6 +223,7 @@ model Match {
   periods      Period[]
   participants MatchParticipant[]
   events       FootballEvent[]
+  operators    MatchOperator[]
 
   @@index([status])
   @@map("matches")
@@ -275,6 +276,31 @@ model MatchParticipant {
   @@unique([matchId, playerId])
   @@index([matchId])
   @@map("match_participants")
+}
+
+enum MatchOperatorRole {
+  SCORER
+  OFFICIAL
+  ORGANIZER
+}
+
+// Explicit delegation of match-operating rights to an account that is not
+// necessarily a CAPTAIN/MANAGER on either team — e.g. a neutral scorer or
+// referee assigned by the match creator. Closes the gap where "operate a
+// match" could only ever mean "own/manage a participating team"
+// (requirements matrix row 14).
+model MatchOperator {
+  id                 String            @id @default(uuid())
+  matchId            String
+  match              Match             @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  accountId          String
+  role               MatchOperatorRole @default(SCORER)
+  grantedByAccountId String
+  createdAt          DateTime          @default(now())
+
+  @@unique([matchId, accountId])
+  @@index([matchId])
+  @@map("match_operators")
 }
 
 // ---------------------------------------------------------------------------

@@ -46,10 +46,10 @@ and makes closing it the flagship Stage 1 requirement. It's closed:
   the fix to special-case old rows.
 - **Still not done** (documented honestly, not silently dropped): this is
   team-level authorization, not the full RBAC the v2 spec ultimately
-  wants — there's no platform-admin role, no organization role, no
-  competition-official role, and no way to designate a scorer who isn't
-  also a team captain/manager. That's real remaining work, tracked as
-  row 43 in the requirements matrix.
+  wants — there's no platform-admin role, no organization role, and no
+  competition-official role yet (a scorer/official who isn't a team
+  captain/manager *is* now supported — see Stage 3 below). That's real
+  remaining work, tracked as row 43 in the requirements matrix.
 
 ## 0.1 Stage 2 update (partial, this session) — elite-club visual identity
 
@@ -72,6 +72,42 @@ Manchester United, with no club branding, crests, or proprietary assets.
 - Not done: the rest of Stage 2 (global app shell/nav polish, the full
   named component list from the v2 spec's Section 24, motion/elevation
   tokens) is still open.
+
+## 0.2 Stage 3 update (this session) — match officials/operators
+
+Closes requirements-matrix row 14, the one deliberately-deferred piece
+from Stage 1's authorization fix: until now, "who can operate a match"
+was hard-wired to team CAPTAIN/MANAGER or the match creator. Real
+grassroots matches need a neutral scorer or referee who has no team
+relationship at all.
+
+- New `MatchOperator` model (migration `20260925153952_match_operators`):
+  `matchId`, `accountId`, `role` (SCORER/OFFICIAL/ORGANIZER),
+  `grantedByAccountId`.
+- `PermissionsService.assertCanOperateMatch` now checks three paths in
+  order: resource creator → active team CAPTAIN/MANAGER → explicit
+  `MatchOperator` grant. `assertIsMatchCreator` is a narrower check used
+  only for granting/revoking operators — deliberately *not* delegable to
+  captains/managers, so scoring rights can't be handed to a stranger by
+  someone who only manages one side.
+- New endpoints: `POST/GET /matches/:id/operators`,
+  `DELETE /matches/:id/operators/:accountId` (assign by email; the
+  service resolves the target account, so nobody needs to know another
+  user's internal ID).
+- **Proven with a 5-step curl adversarial test**: before delegation the
+  assignee gets 403 starting the match; a non-creator gets 403 trying to
+  grant themselves operator rights; the creator's grant succeeds; the
+  delegate can now start the match and would be able to score; a fourth,
+  never-delegated account still gets 403 recording an event.
+- Web UI: a creator-only "Match operators" panel on the Match Centre
+  (grant by email + role, list current operators, revoke) —
+  screenshot-verified showing the exact operator granted in the curl test.
+- Not done: OFFICIAL/ORGANIZER roles exist in the schema and API but have
+  no distinct permissions yet from SCORER (e.g. an OFFICIAL should
+  eventually be able to record discipline/cards with elevated trust while
+  a SCORER handles routine events) — currently all three roles grant the
+  same `assertCanOperateMatch` pass. That's a real, documented
+  simplification, not a hidden one.
 
 ## 1. Architecture summary
 

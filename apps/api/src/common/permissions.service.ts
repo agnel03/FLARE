@@ -50,7 +50,28 @@ export class PermissionsService {
     });
     if (membership) return;
 
+    // Explicit delegation: a neutral scorer/official the creator assigned,
+    // who may have no team relationship at all (MatchOperator model).
+    const operator = await this.prisma.matchOperator.findUnique({
+      where: { matchId_accountId: { matchId, accountId } },
+    });
+    if (operator) return;
+
     throw new ApiException("FORBIDDEN", "You do not have permission to operate this match.");
+  }
+
+  /**
+   * Narrower than assertCanOperateMatch: only the match creator may
+   * grant/revoke operator delegations. A CAPTAIN/MANAGER can score their
+   * own team's match but should not be able to hand scoring rights to a
+   * stranger — that stays with whoever created the match.
+   */
+  async assertIsMatchCreator(accountId: string, matchId: string): Promise<void> {
+    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
+    if (!match) throw new ApiException("RESOURCE_NOT_FOUND", "Match was not found.");
+    if (match.createdByAccountId !== accountId) {
+      throw new ApiException("FORBIDDEN", "Only the match creator can manage match operators.");
+    }
   }
 
   private activeManagingMembership(accountId: string, teamId: string) {

@@ -30,7 +30,7 @@ evidence of "Verified complete." See the Evidence column.
 | 11 | Match lifecycle (scheduled→live→paused→completed) | Match | Verified complete | State machine enforced server-side |
 | 12 | Match lifecycle authorization | Match | Verified complete | **This stage's flagship fix** — curl-proven: stranger 403s on start/participants/events, owner succeeds |
 | 13 | Lineups/formations | Match | Needs implementation | `MatchParticipant` tracks roster + active/bench only; no formation/shape model |
-| 14 | Officials/operators as a distinct role from team captain/manager | Match | Needs implementation | Current model treats "operate a match" = team CAPTAIN/MANAGER or creator; no separate referee/official/assigned-scorer role |
+| 14 | Officials/operators as a distinct role from team captain/manager | Match | Verified complete | `MatchOperator` model + `assignOperator`/`listOperators`/`revokeOperator`; only the match creator may grant/revoke; curl-proven 5-assertion test (pre-delegation 403, non-creator can't grant, grant succeeds, delegate can now operate, uninvolved stranger still 403); web UI (creator-only panel) screenshot-verified |
 | 15 | Venues/scheduling | Match | Partially implemented | `Venue` model + `scheduledAt` exist; no calendar/conflict detection |
 | 16 | Canonical FootballEvent engine | Event Engine | Verified complete | Full 55-type taxonomy, idempotency, ordering, corrections/retractions with audit trail |
 | 17 | Goal/shot/card/substitution capture + validation | Event Engine | Verified complete | Per-type zod metadata schemas; participant/team validation |
@@ -73,10 +73,12 @@ evidence of "Verified complete." See the Evidence column.
 
 ## Summary
 
-Of 53 tracked requirement rows: **16 Verified complete**, **11 Partially
-implemented**, **1 Blocked by dependency**, **25 Needs implementation**.
+Of 53 tracked requirement rows: **17 Verified complete**, **11 Partially
+implemented**, **1 Blocked by dependency**, **24 Needs implementation**.
 
 This reflects Stage 0 (forensics, done implicitly — this repo's builder
-has full knowledge of it) and Stage 1 (architectural hardening) of the v2
-spec's 18-stage protocol. Stages 2 (design system — partially done this
-turn) through 18 remain.
+has full knowledge of it), Stage 1 (architectural hardening), part of
+Stage 2 (design system — visual identity done, app shell/nav not yet),
+and part of Stage 3 (core football OS — match operators done; lineups/
+formations, club/academy hierarchy, and venue scheduling still open) of
+the v2 spec's 18-stage protocol. Stages 4 through 18 remain.

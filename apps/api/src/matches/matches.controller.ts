@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
-import { addParticipantSchema, createMatchSchema } from "@flare/shared";
+import { Body, Controller, Delete, Get, Param, Post, UseGuards } from "@nestjs/common";
+import { addParticipantSchema, assignMatchOperatorSchema, createMatchSchema } from "@flare/shared";
 import type { AuthenticatedUser } from "@flare/shared";
 import { MatchesService } from "./matches.service";
 import { EventsService } from "../events/events.service";
@@ -63,5 +63,27 @@ export class MatchesController {
   @Get(":matchId/timeline")
   timeline(@Param("matchId") matchId: string) {
     return this.events.listByMatch(matchId);
+  }
+
+  @Post(":matchId/operators")
+  @UseGuards(JwtAuthGuard)
+  assignOperator(@CurrentUser() user: AuthenticatedUser, @Param("matchId") matchId: string, @Body() body: unknown) {
+    return this.matches.assignOperator(user.accountId, matchId, parseOrThrow(assignMatchOperatorSchema, body));
+  }
+
+  @Get(":matchId/operators")
+  @UseGuards(JwtAuthGuard)
+  listOperators(@CurrentUser() user: AuthenticatedUser, @Param("matchId") matchId: string) {
+    return this.matches.listOperators(user.accountId, matchId);
+  }
+
+  @Delete(":matchId/operators/:accountId")
+  @UseGuards(JwtAuthGuard)
+  revokeOperator(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("matchId") matchId: string,
+    @Param("accountId") targetAccountId: string,
+  ) {
+    return this.matches.revokeOperator(user.accountId, matchId, targetAccountId);
   }
 }
