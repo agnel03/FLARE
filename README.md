@@ -1,0 +1,1 @@
+echo "# FLARE" >> README.md
