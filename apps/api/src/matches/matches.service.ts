@@ -4,12 +4,16 @@ import type { FootballEventType, Prisma, PrismaClient } from "@flare/db";
 import type { AddParticipantInput, CreateMatchInput } from "@flare/shared";
 import { PRISMA } from "../prisma/prisma.module";
 import { ApiException } from "../common/api-exception";
+import { PermissionsService } from "../common/permissions.service";
 
 @Injectable()
 export class MatchesService {
-  constructor(@Inject(PRISMA) private readonly prisma: PrismaClient) {}
+  constructor(
+    @Inject(PRISMA) private readonly prisma: PrismaClient,
+    private readonly permissions: PermissionsService,
+  ) {}
 
-  create(input: CreateMatchInput) {
+  create(accountId: string, input: CreateMatchInput) {
     if (input.homeTeamId === input.awayTeamId) {
       throw new ApiException("EVENT_INVALID", "Home and away teams must be different.");
     }
@@ -21,6 +25,7 @@ export class MatchesService {
       durationMinutes: input.durationMinutes,
       periodCount: input.periodCount,
       substitutionModel: input.substitutionModel,
+      createdByAccountId: accountId,
       scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined,
     };
     return this.prisma.match.create({ data });
@@ -41,9 +46,10 @@ export class MatchesService {
     return match;
   }
 
-  async addParticipant(matchId: string, input: AddParticipantInput) {
-    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
-    if (!match) throw new ApiException("RESOURCE_NOT_FOUND", "Match was not found.");
+  async addParticipant(accountId: string, matchId: string, input: AddParticipantInput) {
+    await this.permissions.assertCanOperateMatch(accountId, matchId);
+
+    const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status === "COMPLETED" || match.status === "CANCELLED") {
       throw new ApiException("STATE_CONFLICT", "Cannot modify participants of a finished match.");
     }
@@ -71,9 +77,10 @@ export class MatchesService {
     });
   }
 
-  async start(matchId: string) {
-    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
-    if (!match) throw new ApiException("RESOURCE_NOT_FOUND", "Match was not found.");
+  async start(accountId: string, matchId: string) {
+    await this.permissions.assertCanOperateMatch(accountId, matchId);
+
+    const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status !== "SCHEDULED") {
       throw new ApiException("STATE_CONFLICT", `Cannot start a match in status ${match.status}.`);
     }
@@ -92,23 +99,26 @@ export class MatchesService {
     });
   }
 
-  async pause(matchId: string) {
-    const match = await this.requireStatus(matchId, "LIVE");
+  async pause(accountId: string, matchId: string) {
+    await this.permissions.assertCanOperateMatch(accountId, matchId);
+    await this.requireStatus(matchId, "LIVE");
     const updated = await this.prisma.match.update({ where: { id: matchId }, data: { status: "PAUSED" } });
     await this.recordLifecycleEvent(this.prisma, matchId, "MATCH_PAUSED", null);
     return updated;
   }
 
-  async resume(matchId: string) {
+  async resume(accountId: string, matchId: string) {
+    await this.permissions.assertCanOperateMatch(accountId, matchId);
     await this.requireStatus(matchId, "PAUSED");
     const updated = await this.prisma.match.update({ where: { id: matchId }, data: { status: "LIVE" } });
     await this.recordLifecycleEvent(this.prisma, matchId, "MATCH_RESUMED", null);
     return updated;
   }
 
-  async complete(matchId: string) {
-    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
-    if (!match) throw new ApiException("RESOURCE_NOT_FOUND", "Match was not found.");
+  async complete(accountId: string, matchId: string) {
+    await this.permissions.assertCanOperateMatch(accountId, matchId);
+
+    const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status !== "LIVE" && match.status !== "PAUSED") {
       throw new ApiException("STATE_CONFLICT", `Cannot complete a match in status ${match.status}.`);
     }

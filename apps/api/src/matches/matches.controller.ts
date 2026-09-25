@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { addParticipantSchema, createMatchSchema } from "@flare/shared";
+import type { AuthenticatedUser } from "@flare/shared";
 import { MatchesService } from "./matches.service";
 import { EventsService } from "../events/events.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
+import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { parseOrThrow } from "../common/zod";
 
 @Controller("matches")
@@ -14,8 +16,8 @@ export class MatchesController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  create(@Body() body: unknown) {
-    return this.matches.create(parseOrThrow(createMatchSchema, body));
+  create(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
+    return this.matches.create(user.accountId, parseOrThrow(createMatchSchema, body));
   }
 
   @Get(":matchId")
@@ -25,32 +27,32 @@ export class MatchesController {
 
   @Post(":matchId/participants")
   @UseGuards(JwtAuthGuard)
-  addParticipant(@Param("matchId") matchId: string, @Body() body: unknown) {
-    return this.matches.addParticipant(matchId, parseOrThrow(addParticipantSchema, body));
+  addParticipant(@CurrentUser() user: AuthenticatedUser, @Param("matchId") matchId: string, @Body() body: unknown) {
+    return this.matches.addParticipant(user.accountId, matchId, parseOrThrow(addParticipantSchema, body));
   }
 
   @Post(":matchId/start")
   @UseGuards(JwtAuthGuard)
-  start(@Param("matchId") matchId: string) {
-    return this.matches.start(matchId);
+  start(@CurrentUser() user: AuthenticatedUser, @Param("matchId") matchId: string) {
+    return this.matches.start(user.accountId, matchId);
   }
 
   @Post(":matchId/pause")
   @UseGuards(JwtAuthGuard)
-  pause(@Param("matchId") matchId: string) {
-    return this.matches.pause(matchId);
+  pause(@CurrentUser() user: AuthenticatedUser, @Param("matchId") matchId: string) {
+    return this.matches.pause(user.accountId, matchId);
   }
 
   @Post(":matchId/resume")
   @UseGuards(JwtAuthGuard)
-  resume(@Param("matchId") matchId: string) {
-    return this.matches.resume(matchId);
+  resume(@CurrentUser() user: AuthenticatedUser, @Param("matchId") matchId: string) {
+    return this.matches.resume(user.accountId, matchId);
   }
 
   @Post(":matchId/complete")
   @UseGuards(JwtAuthGuard)
-  complete(@Param("matchId") matchId: string) {
-    return this.matches.complete(matchId);
+  complete(@CurrentUser() user: AuthenticatedUser, @Param("matchId") matchId: string) {
+    return this.matches.complete(user.accountId, matchId);
   }
 
   @Get(":matchId/stats")

@@ -115,11 +115,12 @@ model Club {
 }
 
 model Team {
-  id        String   @id @default(uuid())
-  name      String
-  clubId    String?
-  club      Club?    @relation(fields: [clubId], references: [id], onDelete: SetNull)
-  createdAt DateTime @default(now())
+  id                String   @id @default(uuid())
+  name              String
+  clubId            String?
+  club              Club?    @relation(fields: [clubId], references: [id], onDelete: SetNull)
+  createdByAccountId String?
+  createdAt         DateTime @default(now())
 
   memberships   TeamMembership[]
   homeMatches   Match[]            @relation("HomeTeam")
@@ -210,6 +211,7 @@ model Match {
   periodCount        Int               @default(2)
   substitutionModel  SubstitutionModel @default(NORMAL)
   status             MatchStatus       @default(SCHEDULED)
+  createdByAccountId String?
   scheduledAt        DateTime?
   startedAt          DateTime?
   completedAt        DateTime?

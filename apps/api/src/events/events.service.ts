@@ -10,6 +10,7 @@ import {
 } from "@flare/shared";
 import { PRISMA } from "../prisma/prisma.module";
 import { ApiException } from "../common/api-exception";
+import { PermissionsService } from "../common/permissions.service";
 
 const GOAL_TYPES = new Set(["GOAL", "OWN_GOAL"]);
 const CARD_TYPES = new Set(["YELLOW_CARD", "RED_CARD", "SECOND_YELLOW"]);
@@ -35,7 +36,10 @@ const LIFECYCLE_TYPES = new Set([
  */
 @Injectable()
 export class EventsService {
-  constructor(@Inject(PRISMA) private readonly prisma: PrismaClient) {}
+  constructor(
+    @Inject(PRISMA) private readonly prisma: PrismaClient,
+    private readonly permissions: PermissionsService,
+  ) {}
 
   async create(matchId: string, actorAccountId: string, input: CreateFootballEventInput) {
     if (LIFECYCLE_TYPES.has(input.eventType)) {
@@ -45,8 +49,9 @@ export class EventsService {
       );
     }
 
-    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
-    if (!match) throw new ApiException("RESOURCE_NOT_FOUND", "Match was not found.");
+    await this.permissions.assertCanOperateMatch(actorAccountId, matchId);
+
+    const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status !== "LIVE") {
       throw new ApiException("MATCH_NOT_LIVE", "Events can only be recorded while the match is live.");
     }
@@ -111,6 +116,7 @@ export class EventsService {
   async correct(eventId: string, actorAccountId: string, input: CorrectFootballEventInput) {
     const event = await this.prisma.footballEvent.findUnique({ where: { id: eventId } });
     if (!event) throw new ApiException("RESOURCE_NOT_FOUND", "Event was not found.");
+    await this.permissions.assertCanOperateMatch(actorAccountId, event.matchId);
     if (event.status === "RETRACTED") {
       throw new ApiException("STATE_CONFLICT", "A retracted event cannot be corrected.");
     }
@@ -149,6 +155,7 @@ export class EventsService {
   async retract(eventId: string, actorAccountId: string, reason: string) {
     const event = await this.prisma.footballEvent.findUnique({ where: { id: eventId } });
     if (!event) throw new ApiException("RESOURCE_NOT_FOUND", "Event was not found.");
+    await this.permissions.assertCanOperateMatch(actorAccountId, event.matchId);
     if (event.status === "RETRACTED") return event;
 
     const updated = await this.prisma.$transaction(async (tx) => {

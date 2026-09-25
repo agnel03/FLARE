@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { addTeamMemberSchema, createTeamSchema } from "@flare/shared";
+import type { AuthenticatedUser } from "@flare/shared";
 import { TeamsService } from "./teams.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
+import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { parseOrThrow } from "../common/zod";
 
 @Controller("teams")
@@ -10,8 +12,8 @@ export class TeamsController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  create(@Body() body: unknown) {
-    return this.teams.create(parseOrThrow(createTeamSchema, body));
+  create(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
+    return this.teams.create(user.accountId, parseOrThrow(createTeamSchema, body));
   }
 
   @Get(":teamId")
@@ -26,7 +28,7 @@ export class TeamsController {
 
   @Post(":teamId/members")
   @UseGuards(JwtAuthGuard)
-  addMember(@Param("teamId") teamId: string, @Body() body: unknown) {
-    return this.teams.addMember(teamId, parseOrThrow(addTeamMemberSchema, body));
+  addMember(@CurrentUser() user: AuthenticatedUser, @Param("teamId") teamId: string, @Body() body: unknown) {
+    return this.teams.addMember(user.accountId, teamId, parseOrThrow(addTeamMemberSchema, body));
   }
 }

@@ -1,12 +1,77 @@
 # FLARE — Build Status
 
 This measures the repo against the full FLARE Master Product Specification
-(89 consolidated domain documents). It covers Phase 1 (Foundation) and the
-start of Phase 2 (Core Football) from the spec's own build order. Everything
-described below is real, working code — it was built, migrated against a
-live Postgres database, and exercised end-to-end (curl + a real browser via
-Playwright for the web app; a Metro bundle export for the mobile app). None
-of it is a mock, a stub UI, or a hard-coded fake response.
+(89 consolidated domain documents, now v2.0 — a build-oriented consolidation
+aware of this existing repo, plus an 18-stage execution protocol). It covers
+Phase 1 (Foundation), the start of Phase 2 (Core Football), and — as of this
+update — v2 Stage 1 (Architectural Hardening) and part of Stage 2 (Design
+System). Everything described below is real, working code — it was built,
+migrated against a live Postgres database, and exercised end-to-end (curl +
+a real browser via Playwright for the web app; a Metro bundle export for the
+mobile app). None of it is a mock, a stub UI, or a hard-coded fake response.
+
+See [`REQUIREMENTS_MATRIX.md`](REQUIREMENTS_MATRIX.md) for the row-by-row
+coverage table the v2 spec asks for.
+
+## 0. Stage 1 update (this session) — closing the authorization gap
+
+The v1 status report flagged, in its own words: *"any authenticated user
+can currently score any live match."* The v2 spec calls this out directly
+and makes closing it the flagship Stage 1 requirement. It's closed:
+
+- Added `createdByAccountId` to `Team` and `Match` (migration
+  `20260925152633_add_ownership`).
+- New `PermissionsService` (`apps/api/src/common/permissions.service.ts`):
+  `assertCanManageTeam` / `assertCanOperateMatch` — a user may manage a
+  team or operate a match only if they created it, or hold an **active
+  CAPTAIN/MANAGER** membership on the relevant team(s). Server-side only,
+  resource-scoped, never a frontend-only check.
+- Wired into every previously-open endpoint: `teams.addMember`,
+  `matches.create/addParticipant/start/pause/resume/complete`,
+  `events.create/correct/retract`.
+- Added `@nestjs/throttler`: global 100 req/60s per IP, tightened to
+  10 req/60s on `/auth/login` and `/auth/register`.
+- **Proven, not just written**: a curl adversarial test registered two
+  independent accounts, had the owner create a team/match, then confirmed
+  the second ("stranger") account gets `403 FORBIDDEN` attempting to start
+  the match, add a team member, or record a goal — while the legitimate
+  owner's identical actions succeed and the goal correctly updates the
+  score. The rate limiter was confirmed by hammering `/auth/login` 12
+  times and observing `429` from request #10 onward.
+- **Known consequence, not a bug**: matches/teams created before this
+  migration have `createdByAccountId = NULL` and no pre-existing
+  CAPTAIN/MANAGER memberships, so they're now permanently un-operable by
+  anyone. That's correct deny-by-default behavior for a security fix
+  applied retroactively to dev/seed data — it would defeat the point of
+  the fix to special-case old rows.
+- **Still not done** (documented honestly, not silently dropped): this is
+  team-level authorization, not the full RBAC the v2 spec ultimately
+  wants — there's no platform-admin role, no organization role, no
+  competition-official role, and no way to designate a scorer who isn't
+  also a team captain/manager. That's real remaining work, tracked as
+  row 43 in the requirements matrix.
+
+## 0.1 Stage 2 update (partial, this session) — elite-club visual identity
+
+The v2 spec calls for an original "elite football club" palette — deep
+red, near-black, white, restrained metallic gold — replacing the v1
+orange palette, explicitly inspired by (not copied from) clubs like
+Manchester United, with no club branding, crests, or proprietary assets.
+
+- `packages/design-tokens/src/colors.ts` and `apps/web/app/globals.css`
+  updated together (token *names* unchanged — `background`, `surface`,
+  `brand`, etc. — so nothing downstream broke); added a new `gold`/
+  `goldMuted` token pair, explicitly reserved for achievements/premium/
+  trophies only, never general UI.
+- Mobile picks up the same palette automatically (`apps/mobile/src/theme.ts`
+  imports `darkColors` from the same package) — confirmed by rebuild.
+- Verified visually via Playwright screenshot: home page and Match Centre
+  both render the new red/black/white identity correctly, including the
+  live scoreboard, LIVE badge, and timeline from the authorization test
+  match (1-0, showing the real goal event end-to-end).
+- Not done: the rest of Stage 2 (global app shell/nav polish, the full
+  named component list from the v2 spec's Section 24, motion/elevation
+  tokens) is still open.
 
 ## 1. Architecture summary
 

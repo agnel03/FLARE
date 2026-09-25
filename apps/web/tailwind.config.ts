@@ -27,6 +27,8 @@ const config: Config = {
         danger: "rgb(var(--color-danger) / <alpha-value>)",
         info: "rgb(var(--color-info) / <alpha-value>)",
         live: "rgb(var(--color-live) / <alpha-value>)",
+        gold: "rgb(var(--color-gold) / <alpha-value>)",
+        "gold-muted": "rgb(var(--color-gold-muted) / <alpha-value>)",
       },
       spacing: Object.fromEntries(Object.entries(spacing).map(([k, v]) => [k, `${v}px`])),
       borderRadius: Object.fromEntries(Object.entries(radius).map(([k, v]) => [k, `${v}px`])),

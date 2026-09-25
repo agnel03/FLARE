@@ -3,13 +3,21 @@ import type { Prisma, PrismaClient } from "@flare/db";
 import type { AddTeamMemberInput, CreateTeamInput } from "@flare/shared";
 import { PRISMA } from "../prisma/prisma.module";
 import { ApiException } from "../common/api-exception";
+import { PermissionsService } from "../common/permissions.service";
 
 @Injectable()
 export class TeamsService {
-  constructor(@Inject(PRISMA) private readonly prisma: PrismaClient) {}
+  constructor(
+    @Inject(PRISMA) private readonly prisma: PrismaClient,
+    private readonly permissions: PermissionsService,
+  ) {}
 
-  create(input: CreateTeamInput) {
-    const data: Prisma.TeamUncheckedCreateInput = { name: input.name, clubId: input.clubId };
+  create(accountId: string, input: CreateTeamInput) {
+    const data: Prisma.TeamUncheckedCreateInput = {
+      name: input.name,
+      clubId: input.clubId,
+      createdByAccountId: accountId,
+    };
     return this.prisma.team.create({ data });
   }
 
@@ -30,9 +38,8 @@ export class TeamsService {
     });
   }
 
-  async addMember(teamId: string, input: AddTeamMemberInput) {
-    const team = await this.prisma.team.findUnique({ where: { id: teamId } });
-    if (!team) throw new ApiException("RESOURCE_NOT_FOUND", "Team was not found.");
+  async addMember(accountId: string, teamId: string, input: AddTeamMemberInput) {
+    await this.permissions.assertCanManageTeam(accountId, teamId);
 
     const player = await this.prisma.playerProfile.findUnique({ where: { id: input.playerId } });
     if (!player) throw new ApiException("RESOURCE_NOT_FOUND", "Player was not found.");
