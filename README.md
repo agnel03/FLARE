@@ -1,1 +1,1 @@
-echo "# FLARE" >> README.md
+echo "#   FLARE" >> README.md
