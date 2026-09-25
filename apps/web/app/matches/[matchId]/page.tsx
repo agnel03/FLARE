@@ -24,9 +24,16 @@ interface MatchDetail {
   status: string;
   homeScore: number;
   awayScore: number;
+  createdByAccountId: string | null;
   homeTeam: { id: string; name: string };
   awayTeam: { id: string; name: string };
   participants: MatchParticipant[];
+}
+
+interface MatchOperator {
+  id: string;
+  accountId: string;
+  role: "SCORER" | "OFFICIAL" | "ORGANIZER";
 }
 
 interface Stats {
@@ -45,6 +52,9 @@ export default function MatchCentrePage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [addPlayerId, setAddPlayerId] = useState("");
   const [addTeamId, setAddTeamId] = useState<string>("");
+  const [operators, setOperators] = useState<MatchOperator[]>([]);
+  const [operatorEmail, setOperatorEmail] = useState("");
+  const [operatorRole, setOperatorRole] = useState<MatchOperator["role"]>("SCORER");
 
   const load = useCallback(async () => {
     try {
@@ -115,6 +125,41 @@ export default function MatchCentrePage() {
       await load();
     } catch (err) {
       setActionError(err instanceof ApiClientError ? err.message : "Could not retract event.");
+    }
+  };
+
+  const isCreator = Boolean(me && match?.createdByAccountId === me.accountId);
+
+  useEffect(() => {
+    if (!isCreator || !matchId) return;
+    apiRequest<MatchOperator[]>(`/matches/${matchId}/operators`)
+      .then(setOperators)
+      .catch(() => undefined);
+  }, [isCreator, matchId]);
+
+  const assignOperator = async () => {
+    if (!operatorEmail) return;
+    setActionError(null);
+    try {
+      await apiRequest(`/matches/${matchId}/operators`, {
+        method: "POST",
+        body: { email: operatorEmail, role: operatorRole },
+      });
+      setOperatorEmail("");
+      const updated = await apiRequest<MatchOperator[]>(`/matches/${matchId}/operators`);
+      setOperators(updated);
+    } catch (err) {
+      setActionError(err instanceof ApiClientError ? err.message : "Could not assign operator.");
+    }
+  };
+
+  const revokeOperator = async (accountId: string) => {
+    setActionError(null);
+    try {
+      await apiRequest(`/matches/${matchId}/operators/${accountId}`, { method: "DELETE" });
+      setOperators((prev) => prev.filter((o) => o.accountId !== accountId));
+    } catch (err) {
+      setActionError(err instanceof ApiClientError ? err.message : "Could not revoke operator.");
     }
   };
 
@@ -211,6 +256,56 @@ export default function MatchCentrePage() {
               </Button>
             </div>
           </div>
+
+          {isCreator && (
+            <div className="mt-md border-t border-border pt-sm">
+              <h3 className="text-heading2">Match operators</h3>
+              <p className="mt-xxs text-caption text-text-secondary">
+                Delegate scoring rights to someone who isn&apos;t a captain/manager on either team — a neutral
+                scorer or referee. Only you, as the match creator, can manage this.
+              </p>
+              <div className="mt-xs flex flex-wrap items-end gap-sm">
+                <div className="flex-1">
+                  <Label>Email</Label>
+                  <Input
+                    type="email"
+                    value={operatorEmail}
+                    onChange={(e) => setOperatorEmail(e.target.value)}
+                    placeholder="scorer@example.com"
+                  />
+                </div>
+                <div>
+                  <Label>Role</Label>
+                  <select
+                    className="min-h-[44px] rounded-md border border-border bg-background px-sm text-body text-text-primary"
+                    value={operatorRole}
+                    onChange={(e) => setOperatorRole(e.target.value as MatchOperator["role"])}
+                  >
+                    <option value="SCORER">Scorer</option>
+                    <option value="OFFICIAL">Official</option>
+                    <option value="ORGANIZER">Organizer</option>
+                  </select>
+                </div>
+                <Button onClick={assignOperator} disabled={!operatorEmail}>
+                  Grant access
+                </Button>
+              </div>
+              {operators.length > 0 && (
+                <ul className="mt-sm flex flex-col divide-y divide-border">
+                  {operators.map((op) => (
+                    <li key={op.id} className="flex items-center justify-between py-xs text-bodySmall">
+                      <span className="text-text-primary">
+                        {op.accountId} <span className="text-text-secondary">· {op.role}</span>
+                      </span>
+                      <Button variant="ghost" className="min-h-0 py-0 text-caption" onClick={() => revokeOperator(op.accountId)}>
+                        Revoke
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           <ErrorText>{actionError}</ErrorText>
         </Card>

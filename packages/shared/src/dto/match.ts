@@ -29,6 +29,15 @@ export const addParticipantSchema = z.object({
 });
 export type AddParticipantInput = z.infer<typeof addParticipantSchema>;
 
+export const MATCH_OPERATOR_ROLES = ["SCORER", "OFFICIAL", "ORGANIZER"] as const;
+export type MatchOperatorRole = (typeof MATCH_OPERATOR_ROLES)[number];
+
+export const assignMatchOperatorSchema = z.object({
+  email: z.string().email(),
+  role: z.enum(MATCH_OPERATOR_ROLES).default("SCORER"),
+});
+export type AssignMatchOperatorInput = z.infer<typeof assignMatchOperatorSchema>;
+
 export const MATCH_STATUSES = [
   "SCHEDULED",
   "LIVE",

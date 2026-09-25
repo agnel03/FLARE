@@ -1,15 +1,19 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { FootballEventType, Prisma, PrismaClient } from "@flare/db";
-import type { AddParticipantInput, CreateMatchInput } from "@flare/shared";
+import type { AddParticipantInput, AssignMatchOperatorInput, CreateMatchInput } from "@flare/shared";
 import { PRISMA } from "../prisma/prisma.module";
 import { ApiException } from "../common/api-exception";
+import { PermissionsService } from "../common/permissions.service";
 
 @Injectable()
 export class MatchesService {
-  constructor(@Inject(PRISMA) private readonly prisma: PrismaClient) {}
+  constructor(
+    @Inject(PRISMA) private readonly prisma: PrismaClient,
+    private readonly permissions: PermissionsService,
+  ) {}
 
-  create(input: CreateMatchInput) {
+  create(accountId: string, input: CreateMatchInput) {
     if (input.homeTeamId === input.awayTeamId) {
       throw new ApiException("EVENT_INVALID", "Home and away teams must be different.");
     }
@@ -21,6 +25,7 @@ export class MatchesService {
       durationMinutes: input.durationMinutes,
       periodCount: input.periodCount,
       substitutionModel: input.substitutionModel,
+      createdByAccountId: accountId,
       scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined,
     };
     return this.prisma.match.create({ data });
@@ -41,9 +46,10 @@ export class MatchesService {
     return match;
   }
 
-  async addParticipant(matchId: string, input: AddParticipantInput) {
-    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
-    if (!match) throw new ApiException("RESOURCE_NOT_FOUND", "Match was not found.");
+  async addParticipant(accountId: string, matchId: string, input: AddParticipantInput) {
+    await this.permissions.assertMatchPermission(accountId, matchId, "MATCH_LINEUP_MANAGE");
+
+    const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status === "COMPLETED" || match.status === "CANCELLED") {
       throw new ApiException("STATE_CONFLICT", "Cannot modify participants of a finished match.");
     }
@@ -71,9 +77,10 @@ export class MatchesService {
     });
   }
 
-  async start(matchId: string) {
-    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
-    if (!match) throw new ApiException("RESOURCE_NOT_FOUND", "Match was not found.");
+  async start(accountId: string, matchId: string) {
+    await this.permissions.assertMatchPermission(accountId, matchId, "MATCH_LIFECYCLE_MANAGE");
+
+    const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status !== "SCHEDULED") {
       throw new ApiException("STATE_CONFLICT", `Cannot start a match in status ${match.status}.`);
     }
@@ -92,23 +99,26 @@ export class MatchesService {
     });
   }
 
-  async pause(matchId: string) {
-    const match = await this.requireStatus(matchId, "LIVE");
+  async pause(accountId: string, matchId: string) {
+    await this.permissions.assertMatchPermission(accountId, matchId, "MATCH_LIFECYCLE_MANAGE");
+    await this.requireStatus(matchId, "LIVE");
     const updated = await this.prisma.match.update({ where: { id: matchId }, data: { status: "PAUSED" } });
     await this.recordLifecycleEvent(this.prisma, matchId, "MATCH_PAUSED", null);
     return updated;
   }
 
-  async resume(matchId: string) {
+  async resume(accountId: string, matchId: string) {
+    await this.permissions.assertMatchPermission(accountId, matchId, "MATCH_LIFECYCLE_MANAGE");
     await this.requireStatus(matchId, "PAUSED");
     const updated = await this.prisma.match.update({ where: { id: matchId }, data: { status: "LIVE" } });
     await this.recordLifecycleEvent(this.prisma, matchId, "MATCH_RESUMED", null);
     return updated;
   }
 
-  async complete(matchId: string) {
-    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
-    if (!match) throw new ApiException("RESOURCE_NOT_FOUND", "Match was not found.");
+  async complete(accountId: string, matchId: string) {
+    await this.permissions.assertMatchPermission(accountId, matchId, "MATCH_FINALIZE");
+
+    const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status !== "LIVE" && match.status !== "PAUSED") {
       throw new ApiException("STATE_CONFLICT", `Cannot complete a match in status ${match.status}.`);
     }
@@ -163,6 +173,34 @@ export class MatchesService {
         corners: byTeam(match.awayTeamId, ["CORNER"]),
       },
     };
+  }
+
+  async assignOperator(accountId: string, matchId: string, input: AssignMatchOperatorInput) {
+    await this.permissions.assertIsMatchCreator(accountId, matchId);
+
+    const account = await this.prisma.account.findUnique({ where: { email: input.email } });
+    if (!account) {
+      throw new ApiException("RESOURCE_NOT_FOUND", "No FLARE account exists with that email.");
+    }
+
+    return this.prisma.matchOperator.upsert({
+      where: { matchId_accountId: { matchId, accountId: account.id } },
+      update: { role: input.role },
+      create: { matchId, accountId: account.id, role: input.role, grantedByAccountId: accountId },
+    });
+  }
+
+  async listOperators(accountId: string, matchId: string) {
+    await this.permissions.assertIsMatchCreator(accountId, matchId);
+    return this.prisma.matchOperator.findMany({
+      where: { matchId },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  async revokeOperator(accountId: string, matchId: string, targetAccountId: string) {
+    await this.permissions.assertIsMatchCreator(accountId, matchId);
+    await this.prisma.matchOperator.deleteMany({ where: { matchId, accountId: targetAccountId } });
   }
 
   private async requireStatus(matchId: string, status: "LIVE" | "PAUSED") {
