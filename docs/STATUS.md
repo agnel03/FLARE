@@ -102,12 +102,97 @@ relationship at all.
 - Web UI: a creator-only "Match operators" panel on the Match Centre
   (grant by email + role, list current operators, revoke) —
   screenshot-verified showing the exact operator granted in the curl test.
-- Not done: OFFICIAL/ORGANIZER roles exist in the schema and API but have
-  no distinct permissions yet from SCORER (e.g. an OFFICIAL should
-  eventually be able to record discipline/cards with elevated trust while
-  a SCORER handles routine events) — currently all three roles grant the
-  same `assertCanOperateMatch` pass. That's a real, documented
-  simplification, not a hidden one.
+- **Update (see §0.3 below): the SCORER/OFFICIAL/ORGANIZER
+  identical-permissions simplification noted here has since been fixed —
+  the three roles are now meaningfully differentiated.**
+
+## 0.3 Stage 3 continued (this session) — differentiated permission model, permission matrix artifact, automated tests
+
+Closes the exact gap called out at the end of §0.2 and delivers the three
+things requested before any further Stage 3 feature work: a real
+role/permission model, the mandatory `docs/PERMISSION_MATRIX.md` artifact,
+and an automated regression foundation.
+
+**Permission model.** `packages/shared/src/permissions.ts` is now the
+single source of truth for 9 match permission identifiers
+(`MATCH_EVENT_CREATE`, `_CORRECT`, `_RETRACT`, `MATCH_LIFECYCLE_MANAGE`,
+`MATCH_FINALIZE`, `MATCH_LINEUP_MANAGE`, `MATCH_OPERATOR_{LIST,GRANT,REVOKE}`)
+and the static grant table for 6 match-scoped roles (CREATOR implicit-all;
+CAPTAIN/MANAGER full operational trust unchanged from before; SCORER
+event-create only; OFFICIAL full event-lifecycle trust but no lineup;
+ORGANIZER lineup+clock but no event authority). `PermissionsService.
+assertMatchPermission(accountId, matchId, permission)` computes the
+account's effective permission set as the union of every applicable role
+and checks membership — replacing the old coarse `assertCanOperateMatch`
+that treated all operator roles identically. Every call site in
+`events.service.ts` and `matches.service.ts` now asks for the *specific*
+permission the action needs, not a blanket "can operate" check.
+Operator grant/revoke/list remain creator-only via a separate, stricter
+`assertIsMatchCreator` check — deliberately not part of the permission
+table, so no future role can accidentally inherit it.
+
+**Intentional behavior change from §0.2** (flagged, not hidden): a
+delegated SCORER can no longer start/pause/resume/finalize a match — only
+record events. In the original Stage 3 delegation test, a SCORER
+successfully started a match; under the new, correct model that's denied
+(SCORER lacks `MATCH_LIFECYCLE_MANAGE`) and an ORGANIZER does it instead.
+This is the explicit point of differentiating the roles, not a
+regression — re-verified end-to-end below.
+
+**`docs/PERMISSION_MATRIX.md`** — the full artifact: role inventory
+(implemented + spec-named-but-not-built, clearly separated), permission
+identifiers, the role×permission matrix with rationale for every cell,
+resource-scope rules, per-action conditions, an explicit deny-rule table,
+the `MatchOperator` delegation model (answering all of: who can grant,
+receive, scope, expiry, revocation, audit, duplicates, survives
+completion, self-delegable), the server-side authorization decision flow,
+an endpoint→permission→scope→test enforcement map, and the automated test
+matrix. Cross-referenced with the code and tests per the sync requirement.
+
+**Verified — two independent ways:**
+1. `apps/api/test/manual/permission-matrix.sh`, a black-box adversarial
+   script against the live running API (registers throwaway accounts,
+   safe to re-run — fixed this session to use unique per-run emails after
+   an initial re-run collided on fixed addresses and, separately, tripped
+   the Stage-1 rate limiter, which is itself confirmation the limiter still
+   works). **16/16 assertions pass**, covering: SCORER denied start,
+   ORGANIZER allowed start, OFFICIAL denied lineup, ORGANIZER allowed
+   lineup, ORGANIZER denied event-create, SCORER allowed event-create,
+   SCORER denied correct/retract, OFFICIAL allowed correct, team MANAGER
+   allowed on own match, team MANAGER denied on unrelated match, stranger
+   denied event-create/self-grant/finalize, revoked SCORER immediately
+   denied, OFFICIAL allowed finalize.
+2. `apps/api/test/*.spec.ts` — a real Jest + Supertest suite against a
+   full Nest application instance and a dedicated `flare_test` Postgres
+   database (not mocks, not an in-memory fake): **39/39 tests passing**,
+   confirmed re-runnable twice in a row without manual cleanup (unique
+   emails/client-event-IDs per test). `auth.spec.ts` (8): register,
+   duplicate-email rejection, login, wrong password, nonexistent email,
+   unauthenticated request, valid token, garbage token.
+   `authorization.spec.ts` (20): the full role×permission matrix above
+   plus IDOR tests (resource-ID tampering on team roster management,
+   cross-account player-profile edit attempt), nonexistent-account and
+   nonexistent-match operator grants, and duplicate-operator-assignment
+   upsert behavior. `events.spec.ts` (11): match-not-live rejection,
+   invalid-participant rejection, invalid-team rejection, malformed
+   payload rejection, valid goal + score update, idempotent replay,
+   correction with audit trail, retraction with score recalculation
+   (not incremental), idempotent double-retraction, own-goal
+   attribution to the opposing team.
+
+**Regression confirmed clean**: `prisma migrate deploy` against a fresh
+`flare_test` database (0 errors — also doubles as the "clean migration"
+check), `nest build` (API, 0 errors, test files correctly excluded from
+the production build), `next build` (web, 0 errors), `tsc --noEmit`
+(mobile, 0 errors).
+
+**Not done yet** (explicitly deferred, per the request's own ordering —
+steps 3-6, lineups/formations, come after this foundation): no automated
+tests for web or mobile yet (manual Playwright/typecheck only); no
+soft-revoke audit history for operator revocations (hard delete today —
+documented gap in `PERMISSION_MATRIX.md` §8); platform-admin,
+organization, and competition-official roles still don't exist (no admin
+or competition domain has been built).
 
 ## 1. Architecture summary
 

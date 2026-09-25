@@ -1,22 +1,23 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@flare/db";
+import { MATCH_ROLE_PERMISSIONS, type MatchPermission } from "@flare/shared";
 import { PRISMA } from "../prisma/prisma.module";
 import { ApiException } from "./api-exception";
 
 const MANAGING_ROLES = ["CAPTAIN", "MANAGER"] as const;
 
 /**
- * Closes the IDOR/BOLA gap flagged in the v2 spec: "any authenticated
- * user can score any live match". Authorization is real, server-side,
- * and resource-scoped — never a frontend-only check.
+ * FLARE's server-side authorization decision point. Implements the
+ * decision flow documented in docs/PERMISSION_MATRIX.md: authenticate
+ * (handled by JwtAuthGuard before this runs) → identify resource → load
+ * resource ownership/context → resolve roles → resolve permission →
+ * allow/deny. Never a frontend-only check; every privileged controller
+ * method calls into here, never re-implements a check inline.
  *
- * Current rule (documented scope — see docs/STATUS.md): a user may manage
- * a team, or operate a match, if they created that resource OR hold an
- * ACTIVE CAPTAIN/MANAGER membership on the relevant team(s). This is a
- * real, testable authorization boundary, not yet the full
- * organization/competition/official RBAC model the spec ultimately
- * describes (platform admin, competition officials, organization roles
- * are not implemented yet).
+ * Permission identifiers and role→permission grants live in
+ * @flare/shared (packages/shared/src/permissions.ts) so the matrix
+ * document, this enforcement code, and the automated tests all read from
+ * one definition instead of three that can drift apart.
  */
 @Injectable()
 export class PermissionsService {
@@ -34,37 +35,56 @@ export class PermissionsService {
     throw new ApiException("FORBIDDEN", "You do not have permission to manage this team.");
   }
 
-  async assertCanOperateMatch(accountId: string, matchId: string): Promise<void> {
+  /**
+   * The core check: does `accountId` hold `permission` on `matchId`,
+   * given the union of every match-scoped role they hold? The match
+   * creator implicitly holds every MatchPermission and is not looked up
+   * in MATCH_ROLE_PERMISSIONS (see that file's comment for why).
+   */
+  async assertMatchPermission(accountId: string, matchId: string, permission: MatchPermission): Promise<void> {
     const match = await this.prisma.match.findUnique({ where: { id: matchId } });
     if (!match) throw new ApiException("RESOURCE_NOT_FOUND", "Match was not found.");
 
     if (match.createdByAccountId === accountId) return;
 
-    const membership = await this.prisma.teamMembership.findFirst({
-      where: {
-        status: "ACTIVE",
-        role: { in: [...MANAGING_ROLES] },
-        teamId: { in: [match.homeTeamId, match.awayTeamId] },
-        player: { accountId },
-      },
-    });
-    if (membership) return;
+    const [memberships, operator] = await Promise.all([
+      this.prisma.teamMembership.findMany({
+        where: {
+          status: "ACTIVE",
+          role: { in: [...MANAGING_ROLES] },
+          teamId: { in: [match.homeTeamId, match.awayTeamId] },
+          player: { accountId },
+        },
+      }),
+      this.prisma.matchOperator.findUnique({
+        where: { matchId_accountId: { matchId, accountId } },
+      }),
+    ]);
 
-    // Explicit delegation: a neutral scorer/official the creator assigned,
-    // who may have no team relationship at all (MatchOperator model).
-    const operator = await this.prisma.matchOperator.findUnique({
-      where: { matchId_accountId: { matchId, accountId } },
+    const grantedByTeamRole = memberships.some((m) => {
+      const grants = MATCH_ROLE_PERMISSIONS[m.role === "CAPTAIN" ? "TEAM_CAPTAIN" : "TEAM_MANAGER"];
+      return (grants as readonly string[]).includes(permission);
     });
-    if (operator) return;
+    if (grantedByTeamRole) return;
 
-    throw new ApiException("FORBIDDEN", "You do not have permission to operate this match.");
+    if (operator) {
+      const grants = MATCH_ROLE_PERMISSIONS[operator.role as "SCORER" | "OFFICIAL" | "ORGANIZER"];
+      if ((grants as readonly string[]).includes(permission)) return;
+    }
+
+    throw new ApiException(
+      "FORBIDDEN",
+      `You do not have the ${permission} permission on this match.`,
+    );
   }
 
   /**
-   * Narrower than assertCanOperateMatch: only the match creator may
-   * grant/revoke operator delegations. A CAPTAIN/MANAGER can score their
-   * own team's match but should not be able to hand scoring rights to a
-   * stranger — that stays with whoever created the match.
+   * MATCH_OPERATOR_LIST/GRANT/REVOKE are creator-only, full stop — not
+   * granted to any delegated role (see @flare/shared's
+   * OPERATOR_MANAGEMENT_PERMISSIONS comment: delegated authority is not
+   * further delegable). This is intentionally a separate, stricter check
+   * from assertMatchPermission rather than a table lookup that could
+   * accidentally grant it to a future role.
    */
   async assertIsMatchCreator(accountId: string, matchId: string): Promise<void> {
     const match = await this.prisma.match.findUnique({ where: { id: matchId } });

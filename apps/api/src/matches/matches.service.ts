@@ -47,7 +47,7 @@ export class MatchesService {
   }
 
   async addParticipant(accountId: string, matchId: string, input: AddParticipantInput) {
-    await this.permissions.assertCanOperateMatch(accountId, matchId);
+    await this.permissions.assertMatchPermission(accountId, matchId, "MATCH_LINEUP_MANAGE");
 
     const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status === "COMPLETED" || match.status === "CANCELLED") {
@@ -78,7 +78,7 @@ export class MatchesService {
   }
 
   async start(accountId: string, matchId: string) {
-    await this.permissions.assertCanOperateMatch(accountId, matchId);
+    await this.permissions.assertMatchPermission(accountId, matchId, "MATCH_LIFECYCLE_MANAGE");
 
     const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status !== "SCHEDULED") {
@@ -100,7 +100,7 @@ export class MatchesService {
   }
 
   async pause(accountId: string, matchId: string) {
-    await this.permissions.assertCanOperateMatch(accountId, matchId);
+    await this.permissions.assertMatchPermission(accountId, matchId, "MATCH_LIFECYCLE_MANAGE");
     await this.requireStatus(matchId, "LIVE");
     const updated = await this.prisma.match.update({ where: { id: matchId }, data: { status: "PAUSED" } });
     await this.recordLifecycleEvent(this.prisma, matchId, "MATCH_PAUSED", null);
@@ -108,7 +108,7 @@ export class MatchesService {
   }
 
   async resume(accountId: string, matchId: string) {
-    await this.permissions.assertCanOperateMatch(accountId, matchId);
+    await this.permissions.assertMatchPermission(accountId, matchId, "MATCH_LIFECYCLE_MANAGE");
     await this.requireStatus(matchId, "PAUSED");
     const updated = await this.prisma.match.update({ where: { id: matchId }, data: { status: "LIVE" } });
     await this.recordLifecycleEvent(this.prisma, matchId, "MATCH_RESUMED", null);
@@ -116,7 +116,7 @@ export class MatchesService {
   }
 
   async complete(accountId: string, matchId: string) {
-    await this.permissions.assertCanOperateMatch(accountId, matchId);
+    await this.permissions.assertMatchPermission(accountId, matchId, "MATCH_FINALIZE");
 
     const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status !== "LIVE" && match.status !== "PAUSED") {

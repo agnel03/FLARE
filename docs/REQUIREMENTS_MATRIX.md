@@ -57,28 +57,35 @@ evidence of "Verified complete." See the Evidence column.
 | 38 | Media & multi-camera streaming | Media | Needs implementation | Not started |
 | 39 | AI football intelligence | AI | Needs implementation | Not started |
 | 40 | Premium entitlements (₹99/₹249/₹499/₹899 + trial) | Monetization | Needs implementation | Pricing is documented (this doc + chat) but no entitlement model, billing, or paywall exists |
-| 41 | Resource-level authorization (IDOR/BOLA protection) | Security | Verified complete | **This stage** — `PermissionsService`, curl-proven on team/match/event endpoints |
-| 42 | Rate limiting / abuse prevention | Security | Partially implemented | Global + auth-specific throttling added this stage; no anomaly detection, no CAPTCHA |
-| 43 | RBAC (platform admin / org / competition roles) | Security | Needs implementation | Only team CAPTAIN/MANAGER + resource-creator exist; no admin role, no competition official role |
-| 44 | Admin/backoffice | Admin | Needs implementation | Not started |
-| 45 | Audit trail for admin/competition/entitlement actions | Admin | Blocked by dependency | `EventRevision` covers football events only; no general audit log because there's no admin/competition/entitlement surface yet to audit |
-| 46 | Design tokens (color/typography/spacing) | Design System | Verified complete | Elite-club red/near-black/white/gold palette (this stage), shared by web + mobile from one source |
-| 47 | Shared component library | Design System | Partially implemented | `Scoreboard`, `EventComposer`, `MatchTimeline`, basic UI primitives exist; most of the spec's named component list (PitchView, FormationBoard, StandingsTable, MediaViewer, etc.) not built |
-| 48 | Responsive web | Responsive | Verified complete | Tailwind responsive classes; visually confirmed desktop + mobile viewport |
-| 49 | Mobile-first native app | Responsive | Partially implemented | Expo app exists with a mobile-first scoring screen; single-screen nav, not a full app |
-| 50 | Accessibility | Accessibility | Partially implemented | Semantic HTML, 44px touch targets, contrast-aware tokens; no screen-reader audit, no reduced-motion handling yet |
-| 51 | Internationalization | i18n | Needs implementation | All strings hard-coded in English |
-| 52 | Performance (pagination/caching/indexes) | Performance | Partially implemented | DB indexes on hot query paths exist (`FootballEvent` by match/period/clock, by match/eventType); no caching layer, no pagination on list endpoints yet |
-| 53 | Automated test suite | Testing | Needs implementation | Zero automated tests exist. All verification so far is manual (curl + Playwright browser + Metro bundle) — **the single largest process gap** |
+| 41 | Resource-level authorization (IDOR/BOLA protection) | Security | Verified complete | `PermissionsService`; curl + 39-test Jest suite; explicit IDOR tests (resource-ID tampering on team roster, cross-account player-profile edit) |
+| 42 | Rate limiting / abuse prevention | Security | Partially implemented | Global + auth-specific throttling; confirmed still functioning this stage (accidentally triggered by rapid re-runs of the manual test script — see docs/STATUS.md); no anomaly detection, no CAPTCHA |
+| 43 | RBAC (match-scoped: CREATOR/CAPTAIN/MANAGER/SCORER/OFFICIAL/ORGANIZER) | Security | Verified complete | Differentiated permission-set model (`docs/PERMISSION_MATRIX.md`); 9 match permissions, 6 roles, meaningfully different grants per role; 16/16 adversarial script + 20/20 Jest authorization tests. Platform-admin/org/competition-official roles still not implemented (no admin or competition domain exists yet) |
+| 44 | Permission matrix artifact | Security | Verified complete | `docs/PERMISSION_MATRIX.md` — roles, permission IDs, role×permission matrix, scope/conditions/deny-rule tables, delegation model, decision flow, API enforcement map, test matrix. Kept in sync with `packages/shared/src/permissions.ts` (the machine-checkable identifiers) |
+| 45 | Automated test suite (API) | Testing | Verified complete | Jest + supertest against a real Nest app + dedicated Postgres `flare_test` database (not mocks): `auth.spec.ts` (8 tests), `authorization.spec.ts` (20 tests), `events.spec.ts` (11 tests) — 39/39 passing, confirmed re-runnable twice in a row. Covers registration/login/invalid-credentials, the full role×permission matrix, operator delegation (grant/revoke/duplicate/nonexistent-account/nonexistent-match/immediate-revocation), and the event engine (valid/invalid/idempotent-retry/correction/retraction/audit-trail/score-recalculation/own-goal-attribution) |
+| 46 | Automated test suite (web/mobile) | Testing | Needs implementation | Only the API has automated tests so far; web/mobile verification is still manual (Playwright screenshots, typecheck/build) — explicitly flagged as remaining, not silently dropped |
+| 47 | Admin/backoffice | Admin | Needs implementation | Not started |
+| 48 | Audit trail for admin/competition/entitlement actions | Admin | Blocked by dependency | `EventRevision` covers football events only; no general audit log because there's no admin/competition/entitlement surface yet to audit. `MatchOperator` grants are audited (grantedByAccountId/createdAt) but revocations are a hard delete, not a soft-revoke with history — documented gap in `docs/PERMISSION_MATRIX.md` §8 |
+| 49 | Design tokens (color/typography/spacing) | Design System | Verified complete | Elite-club red/near-black/white/gold palette, shared by web + mobile from one source |
+| 50 | Shared component library | Design System | Partially implemented | `Scoreboard`, `EventComposer`, `MatchTimeline`, basic UI primitives exist; most of the spec's named component list (PitchView, FormationBoard, StandingsTable, MediaViewer, etc.) not built |
+| 51 | Responsive web | Responsive | Verified complete | Tailwind responsive classes; visually confirmed desktop + mobile viewport |
+| 52 | Mobile-first native app | Responsive | Partially implemented | Expo app exists with a mobile-first scoring screen; single-screen nav, not a full app |
+| 53 | Accessibility | Accessibility | Partially implemented | Semantic HTML, 44px touch targets, contrast-aware tokens; no screen-reader audit, no reduced-motion handling yet |
+| 54 | Internationalization | i18n | Needs implementation | All strings hard-coded in English |
+| 55 | Performance (pagination/caching/indexes) | Performance | Partially implemented | DB indexes on hot query paths exist (`FootballEvent` by match/period/clock, by match/eventType); no caching layer, no pagination on list endpoints yet |
+| 56 | Lineups / formations | Match | Needs implementation | `MatchParticipant` tracks roster + active/bench state only; no formation model, no pitch visualization, no position/role assignment beyond the single `position` enum field. Explicitly the next planned work — see docs/STATUS.md |
 
 ## Summary
 
-Of 53 tracked requirement rows: **17 Verified complete**, **11 Partially
-implemented**, **1 Blocked by dependency**, **24 Needs implementation**.
+Of 56 tracked requirement rows: **22 Verified complete**, **12 Partially
+implemented**, **1 Blocked by dependency**, **21 Needs implementation**.
 
 This reflects Stage 0 (forensics, done implicitly — this repo's builder
-has full knowledge of it), Stage 1 (architectural hardening), part of
-Stage 2 (design system — visual identity done, app shell/nav not yet),
-and part of Stage 3 (core football OS — match operators done; lineups/
-formations, club/academy hierarchy, and venue scheduling still open) of
-the v2 spec's 18-stage protocol. Stages 4 through 18 remain.
+has full knowledge of it), Stage 1 (architectural hardening, now including
+a fully differentiated role/permission model — see
+`docs/PERMISSION_MATRIX.md`), part of Stage 2 (design system — visual
+identity done, app shell/nav not yet), and part of Stage 3 (core football
+OS — match operators and role differentiation done; lineups/formations,
+club/academy hierarchy, and venue scheduling still open, explicitly next).
+Stages 4 through 18 remain. The API now has a real automated regression
+suite (39 Jest tests + a 16-assertion black-box script); web/mobile do
+not yet.

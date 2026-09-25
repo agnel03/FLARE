@@ -49,7 +49,7 @@ export class EventsService {
       );
     }
 
-    await this.permissions.assertCanOperateMatch(actorAccountId, matchId);
+    await this.permissions.assertMatchPermission(actorAccountId, matchId, "MATCH_EVENT_CREATE");
 
     const match = await this.prisma.match.findUniqueOrThrow({ where: { id: matchId } });
     if (match.status !== "LIVE") {
@@ -116,7 +116,7 @@ export class EventsService {
   async correct(eventId: string, actorAccountId: string, input: CorrectFootballEventInput) {
     const event = await this.prisma.footballEvent.findUnique({ where: { id: eventId } });
     if (!event) throw new ApiException("RESOURCE_NOT_FOUND", "Event was not found.");
-    await this.permissions.assertCanOperateMatch(actorAccountId, event.matchId);
+    await this.permissions.assertMatchPermission(actorAccountId, event.matchId, "MATCH_EVENT_CORRECT");
     if (event.status === "RETRACTED") {
       throw new ApiException("STATE_CONFLICT", "A retracted event cannot be corrected.");
     }
@@ -155,7 +155,7 @@ export class EventsService {
   async retract(eventId: string, actorAccountId: string, reason: string) {
     const event = await this.prisma.footballEvent.findUnique({ where: { id: eventId } });
     if (!event) throw new ApiException("RESOURCE_NOT_FOUND", "Event was not found.");
-    await this.permissions.assertCanOperateMatch(actorAccountId, event.matchId);
+    await this.permissions.assertMatchPermission(actorAccountId, event.matchId, "MATCH_EVENT_RETRACT");
     if (event.status === "RETRACTED") return event;
 
     const updated = await this.prisma.$transaction(async (tx) => {
