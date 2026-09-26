@@ -1,0 +1,436 @@
+// FLARE — Phase 1 + 2 data model (Foundation + Core Football).
+//
+// Scope: account/auth, player identity, team membership, match lifecycle,
+// and the canonical FootballEvent engine (per "Football Event & Statistics
+// Engine Specification", Source 6 of the FLARE Master Spec).
+//
+// Everything else (89 domains total: competitions, media, gamification,
+// AI, monetization, community, etc.) is intentionally NOT modeled yet —
+// this is the foundation those slices will build on. See
+// /docs/STATUS.md for what's implemented vs. remaining.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity (Source 15: Account/Auth, Source 72: Player Identity)
+// ---------------------------------------------------------------------------
+
+// Login/security identity. Deliberately separate from PlayerProfile —
+// a platform account, a player identity and a competition registration
+// are different concepts (Player Identity spec, core principle).
+model Account {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  players       PlayerProfile[]
+  refreshTokens RefreshToken[]
+
+  @@map("accounts")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  accountId String
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([accountId])
+  @@map("refresh_tokens")
+}
+
+enum PlayerStatus {
+  DRAFT
+  ACTIVE
+  RESTRICTED
+  SUSPENDED
+  MERGED
+  DEACTIVATED
+}
+
+enum PreferredFoot {
+  LEFT
+  RIGHT
+  BOTH
+  UNKNOWN
+}
+
+enum FootballPosition {
+  GOALKEEPER
+  DEFENDER
+  MIDFIELDER
+  FORWARD
+  UNKNOWN
+}
+
+// The stable football identity. Player ID stays stable across teams,
+// clubs and competitions — never encodes team/season/number.
+model PlayerProfile {
+  id                String            @id @default(uuid())
+  accountId         String?
+  account           Account?          @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  displayName       String
+  dateOfBirth       DateTime?
+  nationality       String?
+  preferredFoot     PreferredFoot     @default(UNKNOWN)
+  primaryPosition   FootballPosition  @default(UNKNOWN)
+  secondaryPosition FootballPosition?
+  avatarUrl         String?
+  status            PlayerStatus      @default(ACTIVE)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  memberships  TeamMembership[]
+  participants MatchParticipant[]
+  primaryEvents   FootballEvent[] @relation("PrimaryPlayerEvents")
+  secondaryEvents FootballEvent[] @relation("SecondaryPlayerEvents")
+
+  @@map("player_profiles")
+}
+
+// ---------------------------------------------------------------------------
+// Team / Club (Source 66: Organization/Club/Academy, Source 86: Team/Squad)
+// ---------------------------------------------------------------------------
+
+model Club {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  teams Team[]
+
+  @@map("clubs")
+}
+
+model Team {
+  id                String   @id @default(uuid())
+  name              String
+  clubId            String?
+  club              Club?    @relation(fields: [clubId], references: [id], onDelete: SetNull)
+  createdByAccountId String?
+  createdAt         DateTime @default(now())
+
+  memberships   TeamMembership[]
+  homeMatches   Match[]            @relation("HomeTeam")
+  awayMatches   Match[]            @relation("AwayTeam")
+  participants  MatchParticipant[]
+  eventsAsTeam  FootballEvent[]
+
+  @@map("teams")
+}
+
+enum MembershipRole {
+  PLAYER
+  CAPTAIN
+  MANAGER
+  STAFF
+}
+
+enum MembershipStatus {
+  INVITED
+  PENDING
+  ACTIVE
+  SUSPENDED
+  ENDED
+  REJECTED
+  REVOKED
+}
+
+// Time-bounded relationship between a PlayerProfile and a Team.
+model TeamMembership {
+  id        String            @id @default(uuid())
+  playerId  String
+  player    PlayerProfile     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  teamId    String
+  team      Team              @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  role      MembershipRole    @default(PLAYER)
+  status    MembershipStatus  @default(ACTIVE)
+  startAt   DateTime          @default(now())
+  endAt     DateTime?
+  createdAt DateTime          @default(now())
+
+  @@index([teamId])
+  @@index([playerId])
+  @@map("team_memberships")
+}
+
+// ---------------------------------------------------------------------------
+// Match (Source 51/54/55/60: Match Creation/Lifecycle/Operations/Scoring)
+// ---------------------------------------------------------------------------
+
+model Venue {
+  id        String   @id @default(uuid())
+  name      String
+  location  String?
+  createdAt DateTime @default(now())
+
+  matches Match[]
+
+  @@map("venues")
+}
+
+enum MatchStatus {
+  SCHEDULED
+  LIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+  ABANDONED
+}
+
+enum SubstitutionModel {
+  NORMAL
+  ROLLING
+}
+
+// A match. Format is generic (1v1..11v11) — playersPerSide + duration
+// are configuration, not hard-coded 11v11 assumptions (per Event Engine
+// + AI spec "respect match format" rule).
+model Match {
+  id                 String            @id @default(uuid())
+  homeTeamId         String
+  homeTeam           Team              @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeamId         String
+  awayTeam           Team              @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  venueId            String?
+  venue              Venue?            @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  playersPerSide     Int               @default(11)
+  durationMinutes    Int               @default(90)
+  periodCount        Int               @default(2)
+  substitutionModel  SubstitutionModel @default(NORMAL)
+  status             MatchStatus       @default(SCHEDULED)
+  createdByAccountId String?
+  scheduledAt        DateTime?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  homeScore          Int               @default(0)
+  awayScore          Int               @default(0)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  periods      Period[]
+  participants MatchParticipant[]
+  events       FootballEvent[]
+  operators    MatchOperator[]
+
+  @@index([status])
+  @@map("matches")
+}
+
+enum PeriodStatus {
+  SCHEDULED
+  ACTIVE
+  ENDED
+}
+
+model Period {
+  id           String       @id @default(uuid())
+  matchId      String
+  match        Match        @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  periodNumber Int
+  status       PeriodStatus @default(SCHEDULED)
+  startedAt    DateTime?
+  endedAt      DateTime?
+
+  events FootballEvent[]
+
+  @@unique([matchId, periodNumber])
+  @@map("periods")
+}
+
+enum ParticipantRole {
+  STARTER
+  SUBSTITUTE
+}
+
+// Registers who is eligible to appear in a match and tracks live on-pitch
+// state + derived minutes played (Source 56: Match Participation/Minutes).
+model MatchParticipant {
+  id             String            @id @default(uuid())
+  matchId        String
+  match          Match             @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  teamId         String
+  team           Team              @relation(fields: [teamId], references: [id])
+  playerId       String
+  player         PlayerProfile     @relation(fields: [playerId], references: [id])
+  role           ParticipantRole   @default(STARTER)
+  jerseyNumber   Int?
+  position       FootballPosition  @default(UNKNOWN)
+  isActive       Boolean           @default(false)
+  enteredAtSec   Int?
+  exitedAtSec    Int?
+  minutesPlayed  Int               @default(0)
+
+  @@unique([matchId, playerId])
+  @@index([matchId])
+  @@map("match_participants")
+}
+
+enum MatchOperatorRole {
+  SCORER
+  OFFICIAL
+  ORGANIZER
+}
+
+// Explicit delegation of match-operating rights to an account that is not
+// necessarily a CAPTAIN/MANAGER on either team — e.g. a neutral scorer or
+// referee assigned by the match creator. Closes the gap where "operate a
+// match" could only ever mean "own/manage a participating team"
+// (requirements matrix row 14).
+model MatchOperator {
+  id                 String            @id @default(uuid())
+  matchId            String
+  match              Match             @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  accountId          String
+  role               MatchOperatorRole @default(SCORER)
+  grantedByAccountId String
+  createdAt          DateTime          @default(now())
+
+  @@unique([matchId, accountId])
+  @@index([matchId])
+  @@map("match_operators")
+}
+
+// ---------------------------------------------------------------------------
+// Canonical Football Event Engine (Source 6)
+// ---------------------------------------------------------------------------
+
+// Minimum event registry, Appendix A of the Event Engine spec.
+enum FootballEventType {
+  MATCH_CREATED
+  MATCH_STARTED
+  PERIOD_STARTED
+  PERIOD_ENDED
+  HALF_TIME
+  MATCH_PAUSED
+  MATCH_RESUMED
+  MATCH_COMPLETED
+  GOAL
+  OWN_GOAL
+  SHOT
+  SHOT_ON_TARGET
+  SHOT_OFF_TARGET
+  BLOCKED_SHOT
+  ASSIST
+  KEY_PASS
+  PASS
+  PASS_COMPLETED
+  PASS_INCOMPLETE
+  CROSS
+  THROUGH_BALL
+  POSSESSION_START
+  POSSESSION_END
+  TURNOVER
+  DRIBBLE
+  CARRY
+  TACKLE
+  INTERCEPTION
+  BLOCK
+  CLEARANCE
+  PRESSURE
+  RECOVERY
+  SAVE
+  CLAIM
+  PUNCH
+  DISTRIBUTION
+  GOALKEEPER_ERROR
+  FOUL
+  YELLOW_CARD
+  RED_CARD
+  SECOND_YELLOW
+  ADVANTAGE
+  CORNER
+  FREE_KICK
+  GOAL_KICK
+  THROW_IN
+  KICK_OFF
+  PENALTY_AWARDED
+  PENALTY_MISSED
+  PENALTY_SCORED
+  PENALTY_SAVED
+  SUBSTITUTION
+  FORMATION_CHANGE
+  POSITION_CHANGE
+  TACTICAL_NOTE
+}
+
+enum EventSource {
+  SCORER
+  OFFICIAL
+  IMPORT
+  SYSTEM
+  SENSOR
+}
+
+enum EventStatus {
+  ACTIVE
+  CORRECTED
+  RETRACTED
+}
+
+// The canonical, append-oriented football event. Every downstream system
+// (score, stats, career, gamification, media, AI) derives from this —
+// never a second, independently-maintained source of truth.
+model FootballEvent {
+  id                 String            @id @default(uuid())
+  clientEventId      String? // required for client-created mutations; used for idempotency
+  matchId            String
+  match              Match             @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  periodId           String?
+  period             Period?           @relation(fields: [periodId], references: [id], onDelete: SetNull)
+  eventType          FootballEventType
+  teamId             String?
+  team               Team?             @relation(fields: [teamId], references: [id])
+  primaryPlayerId    String?
+  primaryPlayer      PlayerProfile?    @relation("PrimaryPlayerEvents", fields: [primaryPlayerId], references: [id])
+  secondaryPlayerId  String?
+  secondaryPlayer    PlayerProfile?    @relation("SecondaryPlayerEvents", fields: [secondaryPlayerId], references: [id])
+  matchClockSeconds  Int
+  occurredAt         DateTime          @default(now())
+  pitchX             Float?
+  pitchY             Float?
+  metadata           Json              @default("{}")
+  source             EventSource       @default(SCORER)
+  createdById        String? // account id of the actor who created it
+  status             EventStatus       @default(ACTIVE)
+  schemaVersion      Int               @default(1)
+  sequence           Int               @default(autoincrement())
+  createdAt          DateTime          @default(now())
+
+  revisions EventRevision[]
+
+  // Idempotency: the same client_event_id within a match must never create
+  // a duplicate canonical event (Event Engine spec, Section 41).
+  @@unique([matchId, clientEventId])
+  @@index([matchId, periodId, matchClockSeconds])
+  @@index([matchId, eventType])
+  @@map("football_events")
+}
+
+// Corrections are auditable and never silently rewrite the original event
+// (Event Engine spec, Section 39 "Event Correction").
+model EventRevision {
+  id               String        @id @default(uuid())
+  eventId          String
+  event            FootballEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  previousMetadata Json
+  previousStatus   EventStatus
+  reason           String?
+  correctedById    String
+  createdAt        DateTime      @default(now())
+
+  @@index([eventId])
+  @@map("event_revisions")
+}

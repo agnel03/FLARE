@@ -1,0 +1,34 @@
+{
+  "name": "flare",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FLARE — Football Live Analytics & Real-time Experience",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "db:migrate": "pnpm --filter @flare/db exec prisma migrate dev",
+    "db:generate": "pnpm --filter @flare/db exec prisma generate",
+    "db:seed": "pnpm --filter @flare/db exec tsx prisma/seed.ts",
+    "db:studio": "pnpm --filter @flare/db exec prisma studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "@nestjs/core"
+    ]
+  }
+}
